@@ -1,0 +1,23 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/sohar_leads_crm/nextjs_space/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model SoharLead {
+  id             Int       @id @default(autoincrement())
+  companyName    String    @map("company_name")
+  category       String?
+  phone          String?
+  website        String?
+  status         String    @default("Pending")
+  lastContacted  DateTime? @map("last_contacted") @db.Timestamptz()
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@map("sohar_leads")
+}
