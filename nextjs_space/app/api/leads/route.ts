@@ -2,14 +2,18 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { requireApiSession } from '@/lib/auth/session'
 
 export async function GET(request: NextRequest) {
   try {
+    const unauthorized = await requireApiSession()
+    if (unauthorized) return unauthorized
     const searchParams = request?.nextUrl?.searchParams
     const search = searchParams?.get?.('search') ?? ''
 
     const where = search
-      ? { companyName: { contains: search, mode: 'insensitive' as const } }
+      // SQLite's LIKE comparison is case-insensitive for ASCII text by default.
+      ? { companyName: { contains: search } }
       : {}
 
     const leads = await prisma.soharLead.findMany({

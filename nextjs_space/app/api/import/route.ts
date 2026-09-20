@@ -3,35 +3,24 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import * as XLSX from 'xlsx'
-
-function normalizePhone(raw: any): string {
-  if (raw == null) return ''
-  let phone = String(raw).replace(/[\s\-\(\)]/g, '')
-
-  if (phone.startsWith('00968')) {
-    phone = '968' + phone.slice(5)
-  } else if (phone.startsWith('+968')) {
-    phone = '968' + phone.slice(4)
-  } else if (phone.startsWith('+')) {
-    phone = phone.slice(1)
-  } else if (phone.startsWith('968')) {
-    // already correct
-  } else if (phone.startsWith('0')) {
-    phone = '968' + phone.slice(1)
-  } else if (/^\d{8}$/.test(phone)) {
-    phone = '968' + phone
-  }
-
-  return phone
-}
+import { requireApiSession } from '@/lib/auth/session'
+import { normalizePhone } from '@/lib/leads/phone'
 
 export async function POST(request: NextRequest) {
   try {
+    const unauthorized = await requireApiSession()
+    if (unauthorized) return unauthorized
     const formData = await request?.formData?.()
     const file = formData?.get?.('file') as File | null
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 })
+    }
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      return NextResponse.json({ error: 'Only Excel files (.xlsx or .xls) are supported' }, { status: 400 })
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: 'The file must be 10 MB or smaller' }, { status: 413 })
     }
 
     const arrayBuffer = await file.arrayBuffer()
@@ -78,7 +67,7 @@ export async function POST(request: NextRequest) {
       ).trim() || null
 
       const rawPhone = row?.['Phone'] ?? row?.['phone'] ?? row?.['Phone Number'] ?? row?.['phone_number'] ?? ''
-      const phone = normalizePhone(rawPhone) || null
+      const phone = normalizePhone(rawPhone)
 
       const website = String(
         row?.['Website'] ?? row?.['website'] ?? ''
@@ -95,21 +84,22 @@ export async function POST(request: NextRequest) {
       toInsert.push({ companyName, category, phone, website })
     }
 
-    if (toInsert.length > 0) {
-      // Batch insert in chunks of 500
-      const chunkSize = 500
-      for (let i = 0; i < toInsert.length; i += chunkSize) {
-        const chunk = toInsert.slice(i, i + chunkSize)
-        await prisma.soharLead.createMany({
-          data: chunk,
-          skipDuplicates: true,
-        })
+    // Prisma does not support createMany({ skipDuplicates: true }) with SQLite.
+    // Insert individually so the database's unique phone constraint still protects
+    // against a concurrent import without failing the entire upload.
+    let importedCount = 0
+    for (const lead of toInsert) {
+      try {
+        await prisma.soharLead.create({ data: lead })
+        importedCount += 1
+      } catch (err: any) {
+        if (err?.code !== 'P2002') throw err
       }
     }
 
     return NextResponse.json({
-      count: toInsert.length,
-      message: `Successfully imported ${toInsert.length} leads`,
+      count: importedCount,
+      message: `Successfully imported ${importedCount} leads`,
     })
   } catch (err: any) {
     console.error('Import error:', err)

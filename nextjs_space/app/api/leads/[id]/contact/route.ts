@@ -2,12 +2,15 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { requireApiSession } from '@/lib/auth/session'
 
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const unauthorized = await requireApiSession()
+    if (unauthorized) return unauthorized
     const { id } = await params
     const leadId = parseInt(id, 10)
 
